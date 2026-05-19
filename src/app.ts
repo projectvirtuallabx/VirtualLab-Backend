@@ -23,20 +23,39 @@ import compatibilityRoutes from "./modules/compatibility/compatibility.routes.js
 
 const app = express();
 
-// NOTE: Local file storage will not persist on Render.
-// Consider using cloud storage (S3, Cloudinary) for production.
 const uploadDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
 fs.mkdirSync(uploadDir, { recursive: true });
 
 app.use(helmet());
 
+const allowedOrigins = [
+  "https://virtuallabx.com",
+  "https://www.virtuallabx.com",
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:4173",
+];
 
-// CORS configuration for production
 app.use(
   cors({
-    origin: "*"
+    origin: (origin, callback) => {
+      // allow requests with no origin (mobile apps, curl, Postman)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
+        callback(null, origin);
+      } else {
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-connector-key"],
   })
 );
+
+// Handle preflight requests for all routes
+app.options("*", cors());
+
 app.set("trust proxy", 1);
 app.use(morgan("dev"));
 app.use(cookieParser());
@@ -54,10 +73,8 @@ app.get("/api/test", (_req, res) => {
   res.json({ ok: true });
 });
 
-// Frontend compatibility endpoints at root paths.
 app.use("/", compatibilityRoutes);
 
-// Production API modules.
 app.use("/auth", authRoutes);
 app.use("/users", usersRoutes);
 app.use("/hardware", hardwareRoutes);
