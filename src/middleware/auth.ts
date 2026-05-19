@@ -5,7 +5,8 @@ const JWT_SECRET = process.env.JWT_SECRET!;
 
 export interface AuthedRequest extends Request {
   user?: {
-    id: string;
+    sub: string;
+    email: string;
     role?: string;
   };
 }
@@ -25,9 +26,10 @@ export const requireAuth = (
     const token = authHeader.split(" ")[1];
 
     const decoded = jwt.verify(token, JWT_SECRET);
-    if (typeof decoded === "object" && decoded !== null && "id" in decoded) {
+    if (typeof decoded === "object" && decoded !== null && "sub" in decoded) {
       req.user = {
-        id: (decoded as any).id,
+        sub: (decoded as any).sub,
+        email: (decoded as any).email,
         role: (decoded as any).role,
       };
     } else {
@@ -47,9 +49,10 @@ export const optionalAuth = (req: any, _res: any, next: any) => {
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.split(" ")[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET!);
-      if (typeof decoded === "object" && decoded !== null && "id" in decoded) {
+      if (typeof decoded === "object" && decoded !== null && "sub" in decoded) {
         req.user = {
-          id: (decoded as any).id,
+          sub: (decoded as any).sub,
+          email: (decoded as any).email,
           role: (decoded as any).role,
         };
       }
