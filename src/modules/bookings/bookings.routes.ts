@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request } from "express";
 import { z } from "zod";
 import { prisma } from "../../config/prisma.js";
 import { requireAuth, AuthedRequest } from "../../middleware/auth.js";
@@ -13,80 +13,85 @@ const bookingSchema = z.object({
   labName: z.string().min(1),
   start: z.string().datetime(),
   end: z.string().datetime(),
-  duration: z.number().int().min(1).max(4)
+  duration: z.number().int().min(1).max(4),
 });
 
 
 // ================= GET USER BOOKINGS =================
-router.get("/", requireAuth, async (req: AuthedRequest, res) => {
+router.get("/", requireAuth, async (req: Request, res) => {
+  const r = req as AuthedRequest;
+
   const bookings = await prisma.booking.findMany({
-    where: { userId: req.user!.sub },
+    where: { userId: r.user!.sub },
     include: { user: { select: { email: true } } },
-    orderBy: { start: "asc" }
+    orderBy: { start: "asc" },
   });
 
   res.json({
     bookings: bookings.map((b) => ({
       ...b,
-      userId: b.user?.email || b.userId
-    }))
+      userId: b.user?.email || b.userId,
+    })),
   });
 });
 
 
 // ================= GET ALL BOOKINGS =================
-router.get("/all", requireAuth, async (_req: AuthedRequest, res) => {
+router.get("/all", requireAuth, async (req: Request, res) => {
   const bookings = await prisma.booking.findMany({
     where: { status: { not: "CANCELLED" } },
     include: { user: { select: { email: true } } },
-    orderBy: { start: "asc" }
+    orderBy: { start: "asc" },
   });
 
   res.json({
     bookings: bookings.map((b) => ({
       ...b,
-      userId: b.user?.email || b.userId
-    }))
+      userId: b.user?.email || b.userId,
+    })),
   });
 });
 
 
-// ================= GET SINGLE BOOKING (RDP link for frontend) =================
-router.get("/:id", requireAuth, async (req: AuthedRequest, res) => {
-  const id = String(req.params.id);
+// ================= GET SINGLE BOOKING =================
+router.get("/:id", requireAuth, async (req: Request, res) => {
+  const r = req as AuthedRequest;
+  const id = String(r.params.id);
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    include: { user: { select: { email: true } } }
+    include: { user: { select: { email: true } } },
   });
 
   if (!booking) {
     return res.status(404).json({
-      error: { code: "NOT_FOUND", message: "Booking not found" }
+      error: { code: "NOT_FOUND", message: "Booking not found" },
     });
   }
 
-  if (booking.userId !== req.user!.sub) {
+  if (booking.userId !== r.user!.sub) {
     return res.status(403).json({
-      error: { code: "FORBIDDEN", message: "Forbidden" }
+      error: { code: "FORBIDDEN", message: "Forbidden" },
     });
   }
 
   return res.json({
     booking: {
       ...booking,
-      userId: booking.user?.email || booking.userId
+      userId: booking.user?.email || booking.userId,
     },
-    rdpReady: Boolean(booking.rdpLink)
+    rdpReady: Boolean(booking.rdpLink),
   });
 });
 
 
 // ================= DELETE MY BOOKINGS =================
-router.delete("/mine", requireAuth, async (req: AuthedRequest, res) => {
+router.delete("/mine", requireAuth, async (req: Request, res) => {
+  const r = req as AuthedRequest;
+
   await prisma.booking.updateMany({
-    where: { userId: req.user!.sub, status: { not: "CANCELLED" } },
-    data: { status: "CANCELLED" }
+    where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
+    data: { status: "CANCELLED" },
   });
 
   res.json({ success: true });
@@ -94,26 +99,27 @@ router.delete("/mine", requireAuth, async (req: AuthedRequest, res) => {
 
 
 // ================= DELETE SINGLE =================
-router.delete("/:id", requireAuth, async (req: AuthedRequest, res) => {
-  const id = String(req.params.id);
+router.delete("/:id", requireAuth, async (req: Request, res) => {
+  const r = req as AuthedRequest;
+  const id = String(r.params.id);
 
   const booking = await prisma.booking.findUnique({ where: { id } });
 
   if (!booking) {
     return res.status(404).json({
-      error: { code: "NOT_FOUND", message: "Booking not found" }
+      error: { code: "NOT_FOUND", message: "Booking not found" },
     });
   }
 
-  if (booking.userId !== req.user!.sub) {
+  if (booking.userId !== r.user!.sub) {
     return res.status(403).json({
-      error: { code: "FORBIDDEN", message: "Forbidden" }
+      error: { code: "FORBIDDEN", message: "Forbidden" },
     });
   }
 
   await prisma.booking.update({
     where: { id },
-    data: { status: "CANCELLED" }
+    data: { status: "CANCELLED" },
   });
 
   res.json({ success: true });
@@ -121,9 +127,11 @@ router.delete("/:id", requireAuth, async (req: AuthedRequest, res) => {
 
 
 // ================= CREATE BOOKING =================
-router.post("/", requireAuth, async (req: AuthedRequest, res) => {
+router.post("/", requireAuth, async (req: Request, res) => {
+  const r = req as AuthedRequest;
+
   try {
-    const input = bookingSchema.parse(req.body);
+    const input = bookingSchema.parse(r.body);
 
     const start = new Date(input.start);
     const end = new Date(input.end);
@@ -137,20 +145,18 @@ router.post("/", requireAuth, async (req: AuthedRequest, res) => {
     if (input.duration > 3)
       throw new AppError("Max 3 consecutive slots", 400);
 
-    // overlap check
     const overlap = await prisma.booking.findFirst({
       where: {
         AND: [
           { start: { lt: end } },
           { end: { gt: start } },
-          { status: { not: "CANCELLED" } }
-        ]
-      }
+          { status: { not: "CANCELLED" } },
+        ],
+      },
     });
 
     if (overlap) throw new AppError("Slot overlaps", 409);
 
-    // ✅ CREATE BOOKING
     const booking = await prisma.booking.create({
       data: {
         title: input.title,
@@ -158,37 +164,35 @@ router.post("/", requireAuth, async (req: AuthedRequest, res) => {
         start,
         end,
         duration: input.duration,
-        userId: req.user!.sub,
-        rdpLink: null
-      }
+        userId: r.user!.sub,
+        rdpLink: null,
+      },
     });
 
-    // 🔥 CREATE CONNECTOR TASK (THIS IS THE KEY FIX)
     const hw = await prisma.hardware.findFirst({
-      where: { name: booking.labName }
+      where: { name: booking.labName },
     });
 
-    const nodeId =
-      hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
+    const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
 
     const connectorPayload = {
       bookingId: booking.id,
       userId: booking.userId,
-      userEmail: req.user!.email,
+      userEmail: r.user!.email,
       labName: booking.labName,
       start: booking.start.toISOString(),
       end: booking.end.toISOString(),
       meshNodeId: nodeId,
       durationMinutes: env.MESH_RDP_DURATION_MINUTES,
-      taskType: "GENERATE_RDP"
+      taskType: "GENERATE_RDP",
     };
 
     await prisma.connectorTask.create({
       data: {
         type: "GENERATE_RDP",
         status: "PENDING",
-        payload: connectorPayload
-      }
+        payload: connectorPayload,
+      },
     });
 
     addTask(connectorPayload);
@@ -197,9 +201,8 @@ router.post("/", requireAuth, async (req: AuthedRequest, res) => {
       success: true,
       booking,
       rdpReady: false,
-      message: "Booking confirmed. RDP link will be available shortly."
+      message: "Booking confirmed. RDP link will be available shortly.",
     });
-
   } catch (err) {
     console.error("Booking error:", err);
 

@@ -3,16 +3,16 @@ import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
-export interface AuthedRequest extends Request {
+export type AuthedRequest = Request & {
   user?: {
     sub: string;
     email: string;
     role?: string;
   };
-}
+};
 
 export const requireAuth = (
-  req: AuthedRequest,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {
@@ -27,7 +27,7 @@ export const requireAuth = (
 
     const decoded = jwt.verify(token, JWT_SECRET);
     if (typeof decoded === "object" && decoded !== null && "sub" in decoded) {
-      req.user = {
+      (req as AuthedRequest).user = {
         sub: (decoded as any).sub,
         email: (decoded as any).email,
         role: (decoded as any).role,
@@ -75,7 +75,6 @@ export const requireConnectorAuth = (req: any, res: any, next: any) => {
   next();
 };
 
-/** Bearer token used by the Python connector (SECRET_TOKEN / CONNECTOR_SECRET_TOKEN). */
 export const requireConnectorBearer = (req: any, res: any, next: any) => {
   const auth = req.headers.authorization;
   const expected =

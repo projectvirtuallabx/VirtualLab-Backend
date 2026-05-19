@@ -9,12 +9,12 @@ import { authService } from "../services/auth.service.js";
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  name: z.string().optional()
+  name: z.string().optional(),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(1)
+  password: z.string().min(1),
 });
 
 /* =======================
@@ -46,8 +46,8 @@ export const authController = {
       user: {
         id: user.id,
         email: user.email,
-        name: user.name
-      }
+        name: user.name,
+      },
     });
   },
 
@@ -61,8 +61,8 @@ export const authController = {
       user: {
         id: user.id,
         email: user.email,
-        name: user.name
-      }
+        name: user.name,
+      },
     });
   },
 
@@ -81,22 +81,24 @@ export const authController = {
       user: {
         id: user.id,
         email: user.email,
-        name: user.name
-      }
+        name: user.name,
+      },
     });
   },
 
-  async me(req: AuthedRequest, res: Response) {
-    if (!req.user) {
+  async me(req: Request, res: Response) {
+    const r = req as AuthedRequest;
+
+    if (!r.user) {
       return res.status(200).json({ user: null });
     }
 
     return res.json({
       user: {
-        id: req.user.sub,
-        email: req.user.email,
-        name: req.user.name
-      }
+        id: r.user.sub,
+        email: r.user.email,
+        name: r.user.name,
+      },
     });
   },
 
@@ -109,7 +111,7 @@ export const authController = {
       success: true,
       ...(process.env.NODE_ENV !== "production"
         ? { resetToken: result.token }
-        : {})
+        : {}),
     });
   },
 
@@ -126,5 +128,5 @@ export const authController = {
 
   logout(_req: Request, res: Response) {
     return res.json({ success: true });
-  }
+  },
 };

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request } from "express";
 import multer from "multer";
 import fs from "node:fs";
 import path from "node:path";
@@ -12,22 +12,22 @@ const uploadDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
 fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({ dest: uploadDir });
 
-router.post("/", requireAuth, upload.single("file"), async (req, res) => {
-  const authedReq = req as AuthedRequest;
+router.post("/", requireAuth, upload.single("file"), async (req: Request, res) => {
+  const r = req as AuthedRequest;
 
-  const projectId = z.string().min(1).parse(authedReq.body.projectId);
+  const projectId = z.string().min(1).parse(r.body.projectId);
 
-  if (!authedReq.file) {
+  if (!r.file) {
     return res.status(400).json({ error: { code: "FILE_REQUIRED", message: "file is required" } });
   }
 
   const file = await prisma.projectFile.create({
     data: {
       projectId,
-      originalName: authedReq.file.originalname,
-      storagePath: authedReq.file.path,
-      contentType: authedReq.file.mimetype,
-      sizeBytes: authedReq.file.size,
+      originalName: r.file.originalname,
+      storagePath: r.file.path,
+      contentType: r.file.mimetype,
+      sizeBytes: r.file.size,
     },
   });
 
@@ -38,7 +38,7 @@ router.post("/", requireAuth, upload.single("file"), async (req, res) => {
         projectId,
         fileId: file.id,
         path: file.storagePath,
-        userId: authedReq.user!.sub,
+        userId: r.user!.sub,
       },
     },
   });
