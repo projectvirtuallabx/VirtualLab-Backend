@@ -19,23 +19,29 @@ import vmRoutes from "./modules/vm/vm.routes.js";
 import logsRoutes from "./modules/logs/logs.routes.js";
 import compatibilityRoutes from "./modules/compatibility/compatibility.routes.js";
 const app = express();
-// ⚠️ NOTE: Render has ephemeral storage (files will be lost on restart)
-// For production, consider S3 / Cloudinary instead
+// NOTE: Local file storage will not persist on Render.
+// Consider using cloud storage (S3, Cloudinary) for production.
 const uploadDir = path.resolve(process.cwd(), env.UPLOAD_DIR);
 fs.mkdirSync(uploadDir, { recursive: true });
 app.use(helmet());
-// ✅ Safer CORS (fallback for production)
+// CORS configuration for production
 app.use(cors({
-    origin: env.CORS_ORIGIN || true,
-    credentials: true
+    origin: "*"
 }));
+app.set("trust proxy", 1);
 app.use(morgan("dev"));
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use("/files", express.static(uploadDir));
 app.use(optionalAuth);
-app.get("/health", (_req, res) => res.json({ ok: true }));
+// Health check route
+app.get("/", (_req, res) => {
+    res.status(200).json({ message: "Backend is running" });
+});
+app.get("/api/test", (_req, res) => {
+    res.json({ ok: true });
+});
 // Frontend compatibility endpoints at root paths.
 app.use("/", compatibilityRoutes);
 // Production API modules.

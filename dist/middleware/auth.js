@@ -1,29 +1,55 @@
 import jwt from "jsonwebtoken";
-import { env } from "../config/env.js";
-export function optionalAuth(req, _res, next) {
-    const auth = req.headers.authorization;
-    const token = auth?.startsWith("Bearer ") ? auth.slice(7) : req.cookies?.token;
-    if (!token)
-        return next();
+const JWT_SECRET = process.env.JWT_SECRET;
+export const requireAuth = (req, res, next) => {
     try {
-        req.user = jwt.verify(token, env.JWT_SECRET);
-    }
-    catch {
-        req.user = undefined;
-    }
-    next();
-}
-export function requireAuth(req, res, next) {
-    optionalAuth(req, res, () => {
-        if (!req.user)
-            return res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Unauthorized" } });
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const token = authHeader.split(" ")[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
         next();
-    });
-}
-export function requireConnectorAuth(req, res, next) {
-    const apiKey = req.headers["x-connector-key"];
-    if (apiKey !== env.CONNECTOR_API_KEY) {
-        return res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Invalid connector key" } });
+    }
+    catch (err) {
+        return res.status(401).json({ message: "Invalid token" });
+    }
+};
+export const optionalAuth = (req, _res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            const token = authHeader.split(" ")[1];
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            req.user = decoded;
+        }
+    }
+    catch (err) {
+        // ignore errors → optional
     }
     next();
-}
+};
+export const requireConnectorAuth = (req, res, next) => {
+    const key = req.headers["x-connector-key"];
+    const expected = process.env.CONNECTOR_KEY ||
+        process.env.CONNECTOR_API_KEY ||
+        "dev-connector-key";
+    if (!key || key !== expected) {
+        return res.status(401).json({ message: "Unauthorized connector" });
+    }
+    next();
+};
+/** Bearer token used by the Python connector (SECRET_TOKEN / CONNECTOR_SECRET_TOKEN). */
+export const requireConnectorBearer = (req, res, next) => {
+    const auth = req.headers.authorization;
+    const expected = process.env.CONNECTOR_SECRET_TOKEN ||
+        process.env.SECRET_TOKEN ||
+        process.env.CONNECTOR_API_KEY;
+    if (!expected) {
+        return res.status(503).json({ message: "Connector auth not configured" });
+    }
+    if (auth !== `Bearer ${expected}`) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+    next();
+};
