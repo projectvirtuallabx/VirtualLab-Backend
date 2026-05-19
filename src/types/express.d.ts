@@ -2,7 +2,9 @@ import { Request } from "express";
 
 export interface AuthedRequest extends Request {
   user?: {
-    id: string;
+    sub: string;
+    email?: string;
     role?: string;
   };
+  file?: Express.Multer.File;
 }
