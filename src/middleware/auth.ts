@@ -48,8 +48,30 @@ export const optionalAuth = (req: any, _res: any, next: any) => {
 
 export const requireConnectorAuth = (req: any, res: any, next: any) => {
   const key = req.headers["x-connector-key"];
-  if (!key || key !== process.env.CONNECTOR_KEY) {
+  const expected =
+    process.env.CONNECTOR_KEY ||
+    process.env.CONNECTOR_API_KEY ||
+    "dev-connector-key";
+  if (!key || key !== expected) {
     return res.status(401).json({ message: "Unauthorized connector" });
+  }
+  next();
+};
+
+/** Bearer token used by the Python connector (SECRET_TOKEN / CONNECTOR_SECRET_TOKEN). */
+export const requireConnectorBearer = (req: any, res: any, next: any) => {
+  const auth = req.headers.authorization;
+  const expected =
+    process.env.CONNECTOR_SECRET_TOKEN ||
+    process.env.SECRET_TOKEN ||
+    process.env.CONNECTOR_API_KEY;
+
+  if (!expected) {
+    return res.status(503).json({ message: "Connector auth not configured" });
+  }
+
+  if (auth !== `Bearer ${expected}`) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
   next();
 };

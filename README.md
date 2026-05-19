@@ -71,11 +71,15 @@ Response exact shape:
 - `GET/POST /logs`
 - `GET /vm/status`
 
-Connector APIs (protected by `x-connector-key`):
-- `GET /connector/tasks`
-- `POST /connector/task-complete`
-- `POST /connector/status-update`
-- `POST /connector/rdp-link`
+Connector APIs:
+- `GET /connector/poll` — Python connector polls pending RDP tasks (Bearer `CONNECTOR_SECRET_TOKEN`)
+- `POST /connector/callback` — Python connector posts `{ bookingId, rdpLink, shareId, success, error, ... }`
+- `GET /connector/task` — alias poll (DB first, then in-memory queue)
+- Legacy (`x-connector-key` / `CONNECTOR_API_KEY`): `GET /connector/tasks`, `POST /connector/task-complete`, `POST /connector/rdp-link`
+
+Frontend RDP link:
+- `GET /bookings` — each booking includes `rdpLink` when ready
+- `GET /bookings/:id` — `{ booking, rdpReady }` for polling after create
 
 ## 4) Booking Rules Enforced
 

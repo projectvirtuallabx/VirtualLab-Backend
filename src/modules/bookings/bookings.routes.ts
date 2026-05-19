@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma.js";
 import { requireAuth, AuthedRequest } from "../../middleware/auth.js";
 import { AppError } from "../../middleware/errorHandler.js";
 import { env } from "../../config/env.js";
+import { addTask } from "../connector/connector.routes.js";
 
 const router = Router();
 
@@ -46,6 +47,37 @@ router.get("/all", requireAuth, async (_req: AuthedRequest, res) => {
       ...b,
       userId: b.user?.email || b.userId
     }))
+  });
+});
+
+
+// ================= GET SINGLE BOOKING (RDP link for frontend) =================
+router.get("/:id", requireAuth, async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+
+  const booking = await prisma.booking.findUnique({
+    where: { id },
+    include: { user: { select: { email: true } } }
+  });
+
+  if (!booking) {
+    return res.status(404).json({
+      error: { code: "NOT_FOUND", message: "Booking not found" }
+    });
+  }
+
+  if (booking.userId !== req.user!.sub) {
+    return res.status(403).json({
+      error: { code: "FORBIDDEN", message: "Forbidden" }
+    });
+  }
+
+  return res.json({
+    booking: {
+      ...booking,
+      userId: booking.user?.email || booking.userId
+    },
+    rdpReady: Boolean(booking.rdpLink)
   });
 });
 
@@ -139,28 +171,33 @@ router.post("/", requireAuth, async (req: AuthedRequest, res) => {
     const nodeId =
       hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
 
+    const connectorPayload = {
+      bookingId: booking.id,
+      userId: booking.userId,
+      userEmail: req.user!.email,
+      labName: booking.labName,
+      start: booking.start.toISOString(),
+      end: booking.end.toISOString(),
+      meshNodeId: nodeId,
+      durationMinutes: env.MESH_RDP_DURATION_MINUTES,
+      taskType: "GENERATE_RDP"
+    };
+
     await prisma.connectorTask.create({
       data: {
-        type: "BOOKING_CREATE",
+        type: "GENERATE_RDP",
         status: "PENDING",
-        payload: {
-          bookingId: booking.id,
-          userId: booking.userId,
-          userEmail: req.user!.email, // 🔥 REQUIRED
-          labName: booking.labName,
-          start: booking.start.toISOString(),
-          end: booking.end.toISOString(),
-          meshNodeId: nodeId,
-          durationMinutes: env.MESH_RDP_DURATION_MINUTES
-        }
+        payload: connectorPayload
       }
     });
 
-    // ✅ RESPOND TO FRONTEND (UNCHANGED)
+    addTask(connectorPayload);
+
     return res.status(201).json({
       success: true,
       booking,
-      message: "Booking confirmed"
+      rdpReady: false,
+      message: "Booking confirmed. RDP link will be available shortly."
     });
 
   } catch (err) {

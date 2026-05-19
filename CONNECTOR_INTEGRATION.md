@@ -25,9 +25,43 @@ The service will listen on http://0.0.0.0:8000 by default.
 
 # Backend integration
 
-The backend calls the connector service via HTTP (see `src/integrations/connector.service.js`).
+The Python connector **polls** the backend for tasks and **POSTs** results when an RDP link is ready.
 
-Set these environment variables in your backend:
+## Backend `.env`
+
+```
+CONNECTOR_SECRET_TOKEN=your-shared-secret
+BACKEND_PUBLIC_URL=http://localhost:5000
+```
+
+## Connector `.env`
+
+```
+SECRET_TOKEN=your-shared-secret
+BACKEND_POLL_URL=http://localhost:5000/connector/poll
+BACKEND_CALLBACK_URL=http://localhost:5000/connector/callback
+```
+
+## Callback body (connector → backend)
+
+```json
+{
+  "bookingId": "clx...",
+  "rdpLink": "https://mesh.example.com/...",
+  "shareId": "optional-share-id",
+  "success": true,
+  "error": null,
+  "stdout": "...",
+  "stderr": "..."
+}
+```
+
+The backend stores `rdpLink` on the `Booking` row. The frontend reads it via `GET /bookings` or `GET /bookings/:id` (`rdpReady: true` when set).
+
+## Legacy direct HTTP to connector
+
+The backend can still call the connector service via HTTP (see `src/integrations/connector.service.js`):
+
 - CONNECTOR_URL (default: http://localhost:8000)
 - CONNECTOR_SECRET_TOKEN (if using SECRET_TOKEN)
 
