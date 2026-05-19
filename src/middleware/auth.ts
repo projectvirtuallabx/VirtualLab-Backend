@@ -4,7 +4,10 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET = process.env.JWT_SECRET!;
 
 export interface AuthedRequest extends Request {
-  user?: any;
+  user?: {
+    id: string;
+    role?: string;
+  };
 }
 
 export const requireAuth = (
@@ -22,8 +25,14 @@ export const requireAuth = (
     const token = authHeader.split(" ")[1];
 
     const decoded = jwt.verify(token, JWT_SECRET);
-
-    req.user = decoded;
+    if (typeof decoded === "object" && decoded !== null && "id" in decoded) {
+      req.user = {
+        id: (decoded as any).id,
+        role: (decoded as any).role,
+      };
+    } else {
+      return res.status(401).json({ message: "Invalid token payload" });
+    }
 
     next();
   } catch (err) {
@@ -38,7 +47,12 @@ export const optionalAuth = (req: any, _res: any, next: any) => {
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.split(" ")[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET!);
-      req.user = decoded;
+      if (typeof decoded === "object" && decoded !== null && "id" in decoded) {
+        req.user = {
+          id: (decoded as any).id,
+          role: (decoded as any).role,
+        };
+      }
     }
   } catch (err) {
     // ignore errors → optional
