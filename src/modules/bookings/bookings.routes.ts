@@ -175,22 +175,28 @@ router.post("/", requireAuth, async (req: Request, res) => {
 
     const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
 
+    // duration in minutes: booking duration in hours * 60, fallback to env, fallback to 60
+    const durationMinutes =
+      input.duration * 60 ??
+      Number(env.MESH_RDP_DURATION_MINUTES) ??
+      60;
+
     const connectorPayload = {
-      bookingId: booking.id,
-      userId: booking.userId,
-      userEmail: r.user!.email,
-      labName: booking.labName,
-      start: booking.start.toISOString(),
-      end: booking.end.toISOString(),
-      meshNodeId: nodeId,
-      durationMinutes: env.MESH_RDP_DURATION_MINUTES,
-      taskType: "GENERATE_RDP",
+      bookingId:       booking.id,
+      userId:          booking.userId,
+      userEmail:       r.user!.email,
+      labName:         booking.labName,
+      start:           booking.start.toISOString(),
+      end:             booking.end.toISOString(),
+      meshNodeId:      nodeId,
+      durationMinutes: durationMinutes,
+      taskType:        "GENERATE_RDP",
     };
 
     await prisma.connectorTask.create({
       data: {
-        type: "GENERATE_RDP",
-        status: "PENDING",
+        type:    "GENERATE_RDP",
+        status:  "PENDING",
         payload: connectorPayload,
       },
     });
@@ -198,10 +204,10 @@ router.post("/", requireAuth, async (req: Request, res) => {
     addTask(connectorPayload);
 
     return res.status(201).json({
-      success: true,
+      success:  true,
       booking,
       rdpReady: false,
-      message: "Booking confirmed. RDP link will be available shortly.",
+      message:  "Booking confirmed. RDP link will be available shortly.",
     });
   } catch (err) {
     console.error("Booking error:", err);
