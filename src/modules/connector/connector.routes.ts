@@ -28,16 +28,17 @@ function formatPollTask(
 ) {
   const p = (task.payload ?? {}) as Record<string, unknown>;
   return {
-    taskId: task.id,
-    bookingId: p.bookingId,
-    userEmail: p.userEmail,
-    labName: p.labName,
-    meshNodeId: p.meshNodeId,
+    taskId:          task.id,
+    bookingId:       p.bookingId,
+    userId:          p.userId,
+    userEmail:       p.userEmail,
+    labName:         p.labName,
+    meshNodeId:      p.meshNodeId,
     durationMinutes: p.durationMinutes,
-    start: p.start,
-    end: p.end,
-    taskType: "GENERATE_RDP",
-    callbackUrl: `${baseUrl}/connector/callback`
+    start:           p.start,
+    end:             p.end,
+    taskType:        "GENERATE_RDP",
+    callbackUrl:     `${baseUrl}/connector/callback`
   };
 }
 
@@ -61,14 +62,14 @@ async function claimNextDbTask(connectorId: string) {
 }
 
 const callbackSchema = z.object({
-  bookingId: z.string().min(1),
-  rdpLink: z.string().url().nullable().optional(),
-  shareId: z.string().nullable().optional(),
-  success: z.boolean(),
-  error: z.string().nullable().optional(),
-  stdout: z.string().optional(),
-  stderr: z.string().optional(),
-  taskId: z.string().optional()
+  bookingId:  z.string().min(1),
+  rdpLink:    z.string().url().nullable().optional(),
+  shareId:    z.string().nullable().optional(),
+  success:    z.boolean(),
+  error:      z.string().nullable().optional(),
+  stdout:     z.string().optional(),
+  stderr:     z.string().optional(),
+  taskId:     z.string().optional()
 });
 
 // --- DB poll (Python connector: BACKEND_POLL_URL=/connector/poll) ---
@@ -82,12 +83,17 @@ router.get("/poll", requireConnectorBearer, async (req, res) => {
   }
 
   let formatted = formatPollTask(task, baseUrl);
+
   if (!formatted.userEmail && formatted.bookingId) {
     const booking = await prisma.booking.findUnique({
       where: { id: String(formatted.bookingId) },
-      include: { user: { select: { email: true } } }
+      include: { user: { select: { email: true, id: true } } }
     });
-    formatted = { ...formatted, userEmail: booking?.user?.email };
+    formatted = {
+      ...formatted,
+      userEmail: booking?.user?.email,
+      userId: formatted.userId ?? booking?.user?.id,
+    };
   }
 
   return res.json(formatted);
@@ -104,9 +110,13 @@ router.get("/task", requireConnectorBearer, async (req, res) => {
     if (!formatted.userEmail && formatted.bookingId) {
       const booking = await prisma.booking.findUnique({
         where: { id: String(formatted.bookingId) },
-        include: { user: { select: { email: true } } }
+        include: { user: { select: { email: true, id: true } } }
       });
-      formatted = { ...formatted, userEmail: booking?.user?.email };
+      formatted = {
+        ...formatted,
+        userEmail: booking?.user?.email,
+        userId: formatted.userId ?? booking?.user?.id,
+      };
     }
     return res.json(formatted);
   }
@@ -119,7 +129,7 @@ router.get("/task", requireConnectorBearer, async (req, res) => {
   return res.json({
     ...memTask,
     callbackUrl: memTask.callbackUrl ?? `${baseUrl}/connector/callback`,
-    taskType: memTask.taskType ?? "GENERATE_RDP"
+    taskType:    memTask.taskType ?? "GENERATE_RDP"
   });
 });
 
@@ -127,13 +137,13 @@ router.post("/callback", requireConnectorBearer, async (req, res) => {
   const input = callbackSchema.parse(req.body);
   const outcome = await applyConnectorCallback({
     bookingId: input.bookingId,
-    rdpLink: input.rdpLink,
-    shareId: input.shareId,
-    success: input.success,
-    error: input.error,
-    stdout: input.stdout,
-    stderr: input.stderr,
-    taskId: input.taskId
+    rdpLink:   input.rdpLink,
+    shareId:   input.shareId,
+    success:   input.success,
+    error:     input.error,
+    stdout:    input.stdout,
+    stderr:    input.stderr,
+    taskId:    input.taskId
   });
 
   if (!outcome.ok) {
@@ -168,17 +178,17 @@ router.get("/tasks", requireConnectorAuth, async (req, res) => {
 router.post("/task-complete", requireConnectorAuth, async (req, res) => {
   const input = z
     .object({
-      taskId: z.string(),
+      taskId:  z.string(),
       success: z.boolean(),
-      result: z.any().optional()
+      result:  z.any().optional()
     })
     .parse(req.body);
 
   const task = await prisma.connectorTask.update({
     where: { id: input.taskId },
     data: {
-      status: input.success ? "COMPLETED" : "FAILED",
-      result: input.result,
+      status:      input.success ? "COMPLETED" : "FAILED",
+      result:      input.result,
       completedAt: new Date()
     }
   });
@@ -189,21 +199,21 @@ router.post("/task-complete", requireConnectorAuth, async (req, res) => {
 router.post("/status-update", requireConnectorAuth, async (req, res) => {
   const input = z
     .object({
-      vmId: z.string(),
-      state: z.string(),
+      vmId:       z.string(),
+      state:      z.string(),
       hardwareId: z.string().optional(),
-      bookingId: z.string().optional(),
-      metadata: z.any().optional()
+      bookingId:  z.string().optional(),
+      metadata:   z.any().optional()
     })
     .parse(req.body);
 
   const vm = await prisma.vmStatus.create({
     data: {
-      vmId: input.vmId,
-      state: input.state,
+      vmId:       input.vmId,
+      state:      input.state,
       hardwareId: input.hardwareId,
-      bookingId: input.bookingId,
-      metadata: input.metadata
+      bookingId:  input.bookingId,
+      metadata:   input.metadata
     }
   });
 
@@ -214,17 +224,17 @@ router.post("/rdp-link", requireConnectorAuth, async (req, res) => {
   const input = z
     .object({
       bookingId: z.string(),
-      rdpLink: z.string().url(),
-      shareId: z.string().optional(),
-      vmId: z.string().optional()
+      rdpLink:   z.string().url(),
+      shareId:   z.string().optional(),
+      vmId:      z.string().optional()
     })
     .parse(req.body);
 
   await applyConnectorCallback({
     bookingId: input.bookingId,
-    rdpLink: input.rdpLink,
-    shareId: input.shareId,
-    success: true
+    rdpLink:   input.rdpLink,
+    shareId:   input.shareId,
+    success:   true
   });
 
   res.json({ success: true });
