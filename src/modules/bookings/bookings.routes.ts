@@ -176,10 +176,7 @@ router.post("/", requireAuth, async (req: Request, res) => {
     const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
 
     // duration in minutes: booking duration in hours * 60, fallback to env, fallback to 60
-    const durationMinutes =
-      input.duration * 60 ??
-      Number(env.MESH_RDP_DURATION_MINUTES) ??
-      60;
+    const durationMinutes = input.duration * 60;
 
     const connectorPayload = {
       bookingId:       booking.id,
