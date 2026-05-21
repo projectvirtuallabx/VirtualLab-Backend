@@ -22,7 +22,7 @@ router.get("/", requireAuth, async (req: Request, res) => {
   const r = req as AuthedRequest;
 
   const bookings = await prisma.booking.findMany({
-    where: { userId: r.user!.sub },
+    where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
     include: { user: { select: { email: true } } },
     orderBy: { start: "asc" },
   });
