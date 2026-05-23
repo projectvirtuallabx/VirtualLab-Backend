@@ -16,6 +16,22 @@ const bookingSchema = z.object({
   duration: z.number().int().min(1).max(4),
 });
 
+// helper to get shareId from the completed GENERATE_RDP task for a booking
+async function getShareId(bookingId: string): Promise<string | null> {
+  const tasks = await prisma.connectorTask.findMany({
+    where: { type: "GENERATE_RDP" },
+    orderBy: { createdAt: "desc" },
+  });
+
+  for (const task of tasks) {
+    const p = task.payload as Record<string, unknown> | null;
+    if (p && p["bookingId"] === bookingId) {
+      return (task.result as any)?.shareId ?? null;
+    }
+  }
+  return null;
+}
+
 
 // ================= GET USER BOOKINGS =================
 router.get("/", requireAuth, async (req: Request, res) => {
@@ -89,10 +105,43 @@ router.get("/:id", requireAuth, async (req: Request, res) => {
 router.delete("/mine", requireAuth, async (req: Request, res) => {
   const r = req as AuthedRequest;
 
+  const myBookings = await prisma.booking.findMany({
+    where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
+  });
+
   await prisma.booking.updateMany({
     where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
     data: { status: "CANCELLED" },
   });
+
+  for (const booking of myBookings) {
+    const hw = await prisma.hardware.findFirst({ where: { name: booking.labName } });
+    const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
+    const shareId = await getShareId(booking.id);
+
+    const connectorPayload = {
+      bookingId:       booking.id,
+      userId:          booking.userId,
+      userEmail:       r.user!.email,
+      labName:         booking.labName,
+      start:           booking.start.toISOString(),
+      end:             booking.end.toISOString(),
+      meshNodeId:      nodeId,
+      durationMinutes: booking.duration * 60,
+      shareId,
+      taskType:        "BOOKING_DELETE",
+    };
+
+    await prisma.connectorTask.create({
+      data: {
+        type:    "BOOKING_DELETE",
+        status:  "PENDING",
+        payload: connectorPayload,
+      },
+    });
+
+    addTask(connectorPayload);
+  }
 
   res.json({ success: true });
 });
@@ -121,6 +170,33 @@ router.delete("/:id", requireAuth, async (req: Request, res) => {
     where: { id },
     data: { status: "CANCELLED" },
   });
+
+  const hw = await prisma.hardware.findFirst({ where: { name: booking.labName } });
+  const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
+  const shareId = await getShareId(id);
+
+  const connectorPayload = {
+    bookingId:       booking.id,
+    userId:          booking.userId,
+    userEmail:       r.user!.email,
+    labName:         booking.labName,
+    start:           booking.start.toISOString(),
+    end:             booking.end.toISOString(),
+    meshNodeId:      nodeId,
+    durationMinutes: booking.duration * 60,
+    shareId,
+    taskType:        "BOOKING_DELETE",
+  };
+
+  await prisma.connectorTask.create({
+    data: {
+      type:    "BOOKING_DELETE",
+      status:  "PENDING",
+      payload: connectorPayload,
+    },
+  });
+
+  addTask(connectorPayload);
 
   res.json({ success: true });
 });
@@ -159,13 +235,13 @@ router.post("/", requireAuth, async (req: Request, res) => {
 
     const booking = await prisma.booking.create({
       data: {
-        title: input.title,
-        labName: input.labName,
+        title:    input.title,
+        labName:  input.labName,
         start,
         end,
         duration: input.duration,
-        userId: r.user!.sub,
-        rdpLink: null,
+        userId:   r.user!.sub,
+        rdpLink:  null,
       },
     });
 
@@ -174,8 +250,6 @@ router.post("/", requireAuth, async (req: Request, res) => {
     });
 
     const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
-
-    // duration in minutes: booking duration in hours * 60, fallback to env, fallback to 60
     const durationMinutes = input.duration * 60;
 
     const connectorPayload = {

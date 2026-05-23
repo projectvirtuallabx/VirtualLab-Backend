@@ -16,6 +16,7 @@ enum BookingStatus {
 
 enum ConnectorTaskType {
   BOOKING_CREATE
+  BOOKING_DELETE
   FILE_TRANSFER
   GENERATE_RDP
   STATUS_UPDATE
