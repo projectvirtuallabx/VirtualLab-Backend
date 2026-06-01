@@ -13,7 +13,7 @@ const bookingSchema = z.object({
   labName: z.string().min(1),
   start: z.string().datetime(),
   end: z.string().datetime(),
-  duration: z.number().int().min(1).max(4),
+  duration: z.number().positive().max(4),
 });
 
 // helper to get shareId from the completed GENERATE_RDP task for a booking
@@ -37,35 +37,49 @@ async function getShareId(bookingId: string): Promise<string | null> {
 router.get("/", requireAuth, async (req: Request, res) => {
   const r = req as AuthedRequest;
 
-  const bookings = await prisma.booking.findMany({
-    where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
-    include: { user: { select: { email: true } } },
-    orderBy: { start: "asc" },
-  });
+  try {
+    const bookings = await prisma.booking.findMany({
+      where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
+      include: { user: { select: { email: true } } },
+      orderBy: { start: "asc" },
+    });
 
-  res.json({
-    bookings: bookings.map((b) => ({
-      ...b,
-      userId: b.user?.email || b.userId,
-    })),
-  });
+    res.json({
+      bookings: bookings.map((b) => ({
+        ...b,
+        userId: b.user?.email || b.userId,
+      })),
+    });
+  } catch (err) {
+    console.error("Error fetching bookings:", err);
+    res.status(500).json({ 
+      error: { code: "SERVER_ERROR", message: "Failed to fetch bookings" } 
+    });
+  }
 });
 
 
 // ================= GET ALL BOOKINGS =================
 router.get("/all", requireAuth, async (req: Request, res) => {
-  const bookings = await prisma.booking.findMany({
-    where: { status: { not: "CANCELLED" } },
-    include: { user: { select: { email: true } } },
-    orderBy: { start: "asc" },
-  });
+  try {
+    const bookings = await prisma.booking.findMany({
+      where: { status: { not: "CANCELLED" } },
+      include: { user: { select: { email: true } } },
+      orderBy: { start: "asc" },
+    });
 
-  res.json({
-    bookings: bookings.map((b) => ({
-      ...b,
-      userId: b.user?.email || b.userId,
-    })),
-  });
+    res.json({
+      bookings: bookings.map((b) => ({
+        ...b,
+        userId: b.user?.email || b.userId,
+      })),
+    });
+  } catch (err) {
+    console.error("Error fetching all bookings:", err);
+    res.status(500).json({ 
+      error: { code: "SERVER_ERROR", message: "Failed to fetch bookings" } 
+    });
+  }
 });
 
 
@@ -74,30 +88,37 @@ router.get("/:id", requireAuth, async (req: Request, res) => {
   const r = req as AuthedRequest;
   const id = String(r.params.id);
 
-  const booking = await prisma.booking.findUnique({
-    where: { id },
-    include: { user: { select: { email: true } } },
-  });
+  try {
+    const booking = await prisma.booking.findUnique({
+      where: { id },
+      include: { user: { select: { email: true } } },
+    });
 
-  if (!booking) {
-    return res.status(404).json({
-      error: { code: "NOT_FOUND", message: "Booking not found" },
+    if (!booking) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Booking not found" },
+      });
+    }
+
+    if (booking.userId !== r.user!.sub) {
+      return res.status(403).json({
+        error: { code: "FORBIDDEN", message: "Forbidden" },
+      });
+    }
+
+    return res.json({
+      booking: {
+        ...booking,
+        userId: booking.user?.email || booking.userId,
+      },
+      rdpReady: Boolean(booking.rdpLink),
+    });
+  } catch (err) {
+    console.error("Error fetching booking:", err);
+    res.status(500).json({ 
+      error: { code: "SERVER_ERROR", message: "Failed to fetch booking" } 
     });
   }
-
-  if (booking.userId !== r.user!.sub) {
-    return res.status(403).json({
-      error: { code: "FORBIDDEN", message: "Forbidden" },
-    });
-  }
-
-  return res.json({
-    booking: {
-      ...booking,
-      userId: booking.user?.email || booking.userId,
-    },
-    rdpReady: Boolean(booking.rdpLink),
-  });
 });
 
 
@@ -105,19 +126,83 @@ router.get("/:id", requireAuth, async (req: Request, res) => {
 router.delete("/mine", requireAuth, async (req: Request, res) => {
   const r = req as AuthedRequest;
 
-  const myBookings = await prisma.booking.findMany({
-    where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
-  });
+  try {
+    const myBookings = await prisma.booking.findMany({
+      where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
+    });
 
-  await prisma.booking.updateMany({
-    where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
-    data: { status: "CANCELLED" },
-  });
+    await prisma.booking.updateMany({
+      where: { userId: r.user!.sub, status: { not: "CANCELLED" } },
+      data: { status: "CANCELLED" },
+    });
 
-  for (const booking of myBookings) {
+    for (const booking of myBookings) {
+      const hw = await prisma.hardware.findFirst({ where: { name: booking.labName } });
+      const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
+      const shareId = await getShareId(booking.id);
+
+      const connectorPayload = {
+        bookingId:       booking.id,
+        userId:          booking.userId,
+        userEmail:       r.user!.email,
+        labName:         booking.labName,
+        start:           booking.start.toISOString(),
+        end:             booking.end.toISOString(),
+        meshNodeId:      nodeId,
+        durationMinutes: booking.duration * 60,
+        shareId,
+        taskType:        "BOOKING_DELETE",
+      };
+
+      await prisma.connectorTask.create({
+        data: {
+          type:    "BOOKING_DELETE",
+          status:  "PENDING",
+          payload: connectorPayload,
+        },
+      });
+
+      addTask(connectorPayload);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting bookings:", err);
+    res.status(500).json({ 
+      error: { code: "SERVER_ERROR", message: "Failed to delete bookings" } 
+    });
+  }
+});
+
+
+// ================= DELETE SINGLE =================
+router.delete("/:id", requireAuth, async (req: Request, res) => {
+  const r = req as AuthedRequest;
+  const id = String(r.params.id);
+
+  try {
+    const booking = await prisma.booking.findUnique({ where: { id } });
+
+    if (!booking) {
+      return res.status(404).json({
+        error: { code: "NOT_FOUND", message: "Booking not found" },
+      });
+    }
+
+    if (booking.userId !== r.user!.sub) {
+      return res.status(403).json({
+        error: { code: "FORBIDDEN", message: "Forbidden" },
+      });
+    }
+
+    await prisma.booking.update({
+      where: { id },
+      data: { status: "CANCELLED" },
+    });
+
     const hw = await prisma.hardware.findFirst({ where: { name: booking.labName } });
     const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
-    const shareId = await getShareId(booking.id);
+    const shareId = await getShareId(id);
 
     const connectorPayload = {
       bookingId:       booking.id,
@@ -141,64 +226,14 @@ router.delete("/mine", requireAuth, async (req: Request, res) => {
     });
 
     addTask(connectorPayload);
-  }
 
-  res.json({ success: true });
-});
-
-
-// ================= DELETE SINGLE =================
-router.delete("/:id", requireAuth, async (req: Request, res) => {
-  const r = req as AuthedRequest;
-  const id = String(r.params.id);
-
-  const booking = await prisma.booking.findUnique({ where: { id } });
-
-  if (!booking) {
-    return res.status(404).json({
-      error: { code: "NOT_FOUND", message: "Booking not found" },
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting booking:", err);
+    res.status(500).json({ 
+      error: { code: "SERVER_ERROR", message: "Failed to delete booking" } 
     });
   }
-
-  if (booking.userId !== r.user!.sub) {
-    return res.status(403).json({
-      error: { code: "FORBIDDEN", message: "Forbidden" },
-    });
-  }
-
-  await prisma.booking.update({
-    where: { id },
-    data: { status: "CANCELLED" },
-  });
-
-  const hw = await prisma.hardware.findFirst({ where: { name: booking.labName } });
-  const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
-  const shareId = await getShareId(id);
-
-  const connectorPayload = {
-    bookingId:       booking.id,
-    userId:          booking.userId,
-    userEmail:       r.user!.email,
-    labName:         booking.labName,
-    start:           booking.start.toISOString(),
-    end:             booking.end.toISOString(),
-    meshNodeId:      nodeId,
-    durationMinutes: booking.duration * 60,
-    shareId,
-    taskType:        "BOOKING_DELETE",
-  };
-
-  await prisma.connectorTask.create({
-    data: {
-      type:    "BOOKING_DELETE",
-      status:  "PENDING",
-      payload: connectorPayload,
-    },
-  });
-
-  addTask(connectorPayload);
-
-  res.json({ success: true });
 });
 
 
@@ -207,20 +242,27 @@ router.post("/", requireAuth, async (req: Request, res) => {
   const r = req as AuthedRequest;
 
   try {
+    // Validate request body
     const input = bookingSchema.parse(r.body);
 
     const start = new Date(input.start);
     const end = new Date(input.end);
 
-    if (start.getTime() < Date.now())
-      throw new AppError("Cannot book in past", 400);
+    // Validation checks
+    if (start.getTime() < Date.now()) {
+      throw new AppError("Cannot book in the past", 400);
+    }
 
-    if (start.getTime() > Date.now() + 3 * 24 * 60 * 60 * 1000)
-      throw new AppError("Max 3 days advance booking", 400);
+    if (start.getTime() > Date.now() + 3 * 24 * 60 * 60 * 1000) {
+      throw new AppError("Maximum 3 days advance booking allowed", 400);
+    }
 
-    if (input.duration > 3)
-      throw new AppError("Max 3 consecutive slots", 400);
+    // Duration should be between 0.25 hours (15 min) and 4 hours
+    if (input.duration < 0.25 || input.duration > 4) {
+      throw new AppError("Duration must be between 15 minutes and 4 hours", 400);
+    }
 
+    // Check for overlapping bookings
     const overlap = await prisma.booking.findFirst({
       where: {
         AND: [
@@ -231,8 +273,11 @@ router.post("/", requireAuth, async (req: Request, res) => {
       },
     });
 
-    if (overlap) throw new AppError("Slot overlaps", 409);
+    if (overlap) {
+      throw new AppError("This time slot overlaps with an existing booking", 409);
+    }
 
+    // Create the booking
     const booking = await prisma.booking.create({
       data: {
         title:    input.title,
@@ -250,7 +295,7 @@ router.post("/", requireAuth, async (req: Request, res) => {
     });
 
     const nodeId = hw?.meshNodeId || env.DEFAULT_MESH_NODE_ID || "";
-    const durationMinutes = input.duration * 60;
+    const durationMinutes = Math.round(input.duration * 60);
 
     const connectorPayload = {
       bookingId:       booking.id,
@@ -284,10 +329,21 @@ router.post("/", requireAuth, async (req: Request, res) => {
     console.error("Booking error:", err);
 
     if (err instanceof AppError) {
-      return res.status(err.statusCode).json({ message: err.message });
+      return res.status(err.statusCode).json({ 
+        message: err.message 
+      });
     }
 
-    return res.status(500).json({ message: "Booking failed" });
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ 
+        message: "Invalid booking data",
+        errors: err.errors
+      });
+    }
+
+    return res.status(500).json({ 
+      message: "Booking failed" 
+    });
   }
 });
 
